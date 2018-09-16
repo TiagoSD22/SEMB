@@ -1,7 +1,7 @@
 /*
     Este código implementa a abertura de um arquivo de imagem em formato .PGM binário(P5) 
     Não são suportados arquivos em outros formatos, nem mesmo .pgm ASCII(P2).
-    Também não suportadas imagens com resolução maior que 1080p (mais de 2073600 pixels)
+    Também não são suportadas imagens com resolução maior que 1080p (mais de 2073600 pixels)
     O objetivo principal é a implementação do algoritmo de Roberts para detecção de bordas e uma demonstração
     do seu uso para realce da imagem.
 
