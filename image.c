@@ -16,7 +16,7 @@
 
 typedef struct IMG_PGM{
     int largura,altura,valorMaximo;
-    unsigned char pixels[2073600]; //vetor estático que suporta imagens de até 1080p (1920x1080)
+    unsigned char pixels[1080][1920];//vetor estático que suporta imagens com resolução de até 1080p
 }ImagePGM;
 
 /*
@@ -40,12 +40,12 @@ int Abrir_Imagem(FILE** img, ImagePGM* image, char* nome_arquivo){
         else{
             fscanf(*img,"%d %d",&image->largura,&image->altura);
             if(image->largura * image->altura > 2073600) {
-                printf("\n\nImagem com resolução muito alta e não suportada!\n\n");   
+                printf("\n\nImagens com resolução maior do que 1080p não são suportadas!\n\n");   
                 return 0;
             }
             fscanf(*img,"%d",&image->valorMaximo);
             if(image->valorMaximo > 255){
-                printf("\n\nImagem com mais de 8 bits por pixel não é suportada!\n\n");
+                printf("\n\nImagens com mais de 8 bits por pixel não são suportadas!\n\n");
                 return 0;
             }
         }
@@ -53,26 +53,30 @@ int Abrir_Imagem(FILE** img, ImagePGM* image, char* nome_arquivo){
     return 1;
 }
 
-int Ler_Pixels(FILE** img,ImagePGM* image){
+void Ler_Pixels(FILE** img,ImagePGM* image){
+    int i,j;
     //esses whiles servem para pular possíveis comentários entre o final do cabeçalho do arquivo e os primeiros bytes de dados
     while (getc((*img)) == '#'){
         while (getc((*img)) != '\n');         
     }
-    if (fread(image->pixels, sizeof(unsigned char), image->largura * image->altura, *img) != image->largura * image->altura) {
-        //caso alguma dimensão do arquivo esteja diferente das informações do cabeçalho resultará em falha
-        printf("\n\nArquivo com cabeçalho ou dados incoerentes!\n\n");
-        fclose(*img);
-        return 0;
-    }
+    for(i = 0; i < image->altura; i++){
+        for(j = 0; j < image->largura; j++){
+            image->pixels[i][j] = getc(*img);
+        }
+    } 
     printf("\n\nImagem carregada com sucesso!\nResolução: %dx%d\n\n",image->largura,image->altura); 
 }
 
 //Salva a imagem em um arquivo com o nome nomeArquivo passado como parâmetro em formato .pgm(P5)
 void Escrever_Imagem(ImagePGM* image, char* nomeArquivo){
+    int i,j;
     FILE* saida;
     saida = fopen(nomeArquivo,"wb");
     fprintf(saida,"P5\n%d %d\n%d\n",image->largura,image->altura,image->valorMaximo);
-    fwrite(image->pixels,sizeof(unsigned char),(image->largura * image->altura),saida);
+    for(i = 0; i < image->altura; i++){
+        for(j = 0; j < image->largura; j++)
+            putc(image->pixels[i][j],saida);
+    }
     fprintf(saida,"\r");
     printf("Arquivo %s gerado com sucesso!\n\n",nomeArquivo);
     fclose(saida);
@@ -87,17 +91,6 @@ void Truncar_Pixel(int* pixel){
 //Filtro de Roberts para detecção de bordas na imagem 
 void Roberts_Cross(ImagePGM* image){
     int i,j, intensidadePixel;
-    //cria um array bidimensional auxiliar para manipulação mais fácil do array de pixels no struct ImagePGM
-    unsigned char image_aux[image->altura + 1][image->largura + 1];
-    for(i = 0; i < image->altura + 1; i++){
-        for(j = 0; j < image->largura + 1; j++){
-            if(i < image->altura && j < image->largura)
-                image_aux[i][j] = image->pixels[(image->largura * i) + j];
-            else
-                image_aux[i][j] = 0;
-        }
-    }
-
     image->valorMaximo = 0;//O valor da maior intensidade provavelmente será alterado, este valor será gravado no arquivo de saída
 
     /*
@@ -106,15 +99,30 @@ void Roberts_Cross(ImagePGM* image){
         Gy = (P(x, y + 1) - P(x + 1, y))
         P'(x,y) = sqrt(Gx^2 + Gy^2)
     */
+
     for(i = 0; i < image->altura; i++){
         for(j = 0; j < image->largura; j++){
-            intensidadePixel = (int)(sqrt((int)(pow((int)(image_aux[i][j] - image_aux[i + 1][j + 1]),2)) + (int)(pow((int)(image_aux[i][j + 1] - image_aux[i + 1][j]),2))));
+            if(i != image->altura - 1 && j != image->largura - 1){
+                intensidadePixel = (int)(sqrt((int)(pow((int)(image->pixels[i][j] - (int)image->pixels[i + 1][j + 1]),2)) + 
+                                          (int)(pow((int)(image->pixels[i][j + 1] - (int)image->pixels[i + 1][j]),2))));
+            }
+            else{
+                if(j == image->largura - 1 && i != image->altura - 1){
+                    intensidadePixel = (int)sqrt(pow((int)image->pixels[i][j],2) + pow((int)image->pixels[i + 1][j],2));
+                }
+                else{
+                    if(j != image->largura - 1){
+                        intensidadePixel = (int)sqrt(pow((int)image->pixels[i][j],2) + pow((int)image->pixels[i][j + 1],2));
+                    }
+                    else{
+                        intensidadePixel = (int)image->pixels[i][j];
+                    }
+                }
+            }
             Truncar_Pixel(&intensidadePixel);//caso algum pixel p' fique acima de 255
             //guarda o novo valor maximo de intensidade para ser gravado no arquivo de saida
             if(intensidadePixel > image->valorMaximo) image->valorMaximo = intensidadePixel;
-            image_aux[i][j] = intensidadePixel;
-            //copia o novo pixel do array auxiliar para o original
-            image->pixels[(image->largura * i) + j] = (unsigned char)(image_aux[i][j]);
+            image->pixels[i][j] = (unsigned char)intensidadePixel;
         }
     }
 }
@@ -123,10 +131,12 @@ void Roberts_Cross(ImagePGM* image){
 void Somar_Imagens(ImagePGM* img1, ImagePGM* img2){
     int i,j;
     int novaIntensidade;
-    for(i = 0; i < (img1->altura * img1->largura); i++){
-        novaIntensidade = img1->pixels[i] + img2->pixels[i]; 
-        Truncar_Pixel(&novaIntensidade);
-        img1->pixels[i] = novaIntensidade;
+    for(i = 0; i < img1->altura; i++){
+        for(j = 0; j < img1->largura; j++){
+            novaIntensidade = img1->pixels[i][j] + img2->pixels[i][j]; 
+            Truncar_Pixel(&novaIntensidade);
+            img1->pixels[i][j] = novaIntensidade;
+        }
     }
 }
 
