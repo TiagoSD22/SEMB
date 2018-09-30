@@ -11,6 +11,7 @@
 #include<math.h>
 #include<stdio.h>
 #include<stdio_ext.h>
+#include<stdlib.h>
 #include<string.h>
 #include<time.h>
 
@@ -77,7 +78,7 @@ void Escrever_Imagem(ImagePGM* image, char* nomeArquivo){
         for(j = 0; j < image->largura; j++)
             putc(image->pixels[i][j],saida);
     }
-    fprintf(saida,"\r");
+    fprintf(saida,"\n\r");
     printf("Arquivo %s gerado com sucesso!\n\n",nomeArquivo);
     fclose(saida);
 }
@@ -88,41 +89,51 @@ void Truncar_Pixel(int* pixel){
     if(*pixel < 0)   *pixel = 0;
 }
 
+//Técnica de padding para trabalhar com o filtro de Roberts
+ImagePGM Padding(ImagePGM* img){
+    int i,j;
+    ImagePGM imgPadd;
+    imgPadd.altura = img->altura + 2;
+    imgPadd.largura = img->largura + 2;
+    imgPadd.valorMaximo = img->valorMaximo;
+    for(i = 0; i < imgPadd.altura; i++){
+        for(j = 0; j < imgPadd.largura; j++){
+            imgPadd.pixels[i][j] =  0;
+        }
+    }
+    for(i = 0; i < img->altura; i++){
+        for(j = 0; j < img->largura; j++){
+            imgPadd.pixels[i + 1][j + 1] = img->pixels[i][j];
+        }
+    }
+    return imgPadd;
+}
+
 //Filtro de Roberts para detecção de bordas na imagem 
-void Roberts_Cross(ImagePGM* image){
-    int i,j, intensidadePixel;
-    image->valorMaximo = 0;//O valor da maior intensidade provavelmente será alterado, este valor será gravado no arquivo de saída
-
-    /*
-        Pela definição do algoritmo de Roberts, para um pixel em x,y dado por P(x,y) = p, seu novo valor, p' dado por P'(x,y) será:
-        Gx = (P(x,y) - P(x + 1, y + 1))
-        Gy = (P(x, y + 1) - P(x + 1, y))
-        P'(x,y) = sqrt(Gx^2 + Gy^2)
-    */
-
-    for(i = 0; i < image->altura; i++){
-        for(j = 0; j < image->largura; j++){
-            if(i != image->altura - 1 && j != image->largura - 1){
-                intensidadePixel = (int)(sqrt((int)(pow((int)(image->pixels[i][j] - (int)image->pixels[i + 1][j + 1]),2)) + 
-                                          (int)(pow((int)(image->pixels[i][j + 1] - (int)image->pixels[i + 1][j]),2))));
-            }
-            else{
-                if(j == image->largura - 1 && i != image->altura - 1){
-                    intensidadePixel = (int)sqrt(pow((int)image->pixels[i][j],2) + pow((int)image->pixels[i + 1][j],2));
-                }
-                else{
-                    if(j != image->largura - 1){
-                        intensidadePixel = (int)sqrt(pow((int)image->pixels[i][j],2) + pow((int)image->pixels[i][j + 1],2));
+void Roberts_Cross_Padding(ImagePGM* img){
+    int i,j,x,y,novaIntensidade,gx,gy;    
+    int robertX[2][2] = {{1,0},{0,-1}};
+    int robertY[2][2] = {{0,1},{-1,0}};
+    ImagePGM imgPadd = Padding(img);
+    for(i = 0; i < img->altura; i++){
+        for(j = 0; j < img->largura; j++){
+            gx = 0;
+            gy = 0;
+            for(x = 0; x < 2; x++){
+                for(y = 0; y < 2; y++){
+                    if(i > 0 && j > 0){
+                        gx += ((int)(imgPadd.pixels[i + x][j + y])) * robertX[x][y];
+                        gy += ((int)(imgPadd.pixels[i + x][j + y])) * robertY[x][y];
                     }
                     else{
-                        intensidadePixel = (int)image->pixels[i][j];
+                        gx += ((int)(img->pixels[i + x][j + y])) * robertX[x][y];
+                        gy += ((int)(img->pixels[i + x][j + y])) * robertY[x][y];
                     }
                 }
             }
-            Truncar_Pixel(&intensidadePixel);//caso algum pixel p' fique acima de 255
-            //guarda o novo valor maximo de intensidade para ser gravado no arquivo de saida
-            if(intensidadePixel > image->valorMaximo) image->valorMaximo = intensidadePixel;
-            image->pixels[i][j] = (unsigned char)intensidadePixel;
+            novaIntensidade = (int)sqrt(pow((double)gx,2) + pow((double)gy,2));
+            Truncar_Pixel(&novaIntensidade);
+            img->pixels[i][j] = (unsigned char)novaIntensidade;
         }
     }
 }
@@ -140,19 +151,14 @@ void Somar_Imagens(ImagePGM* img1, ImagePGM* img2){
     }
 }
 
-void Registrar_Tempo(char* nome_imagem, double* tempo){
-    FILE* arquivo = fopen("Tempos.txt","a");
-    fprintf(arquivo,"\n%s %lf",nome_imagem,*tempo);
-}
-
 int main(int narg, char* argv[]){
     FILE* img;
     ImagePGM image;
     ImagePGM bordas;
     char nome_arquivo[50];
-
     //caso o código seja executado passando um arquivo de imagem como parâmetro
-    if(narg > 1) strcpy(nome_arquivo,argv[1]);
+    if(narg > 1) 
+        strcpy(nome_arquivo,argv[1]);
     else{
         printf("Digite o nome do arquivo (.pgm) que deseja abrir: ");
         __fpurge(stdin);
@@ -162,8 +168,6 @@ int main(int narg, char* argv[]){
     }
     
     if(Abrir_Imagem(&img,&image,nome_arquivo)){
-        clock_t clock_ticks;
-        double tempo;
         char nome_saida_Robert[30];
         char nome_saida_Realce[30];
         strcpy(nome_saida_Robert,nome_arquivo);
@@ -173,11 +177,7 @@ int main(int narg, char* argv[]){
         strcat(nome_saida_Realce,"_Realce.PGM");
         Ler_Pixels(&img,&image);
         bordas = image;
-        clock_ticks = clock();
-        Roberts_Cross(&bordas);
-        clock_ticks = clock() - clock_ticks;
-        tempo = ((double)clock_ticks)/CLOCKS_PER_SEC;
-        Registrar_Tempo(nome_arquivo,&tempo);
+        Roberts_Cross_Padding(&bordas);
         //guarda o resultado das bordas de Robert para verificar se o algoritmo encontrou algo coerente
         Escrever_Imagem(&bordas,nome_saida_Robert);
         Somar_Imagens(&image, &bordas);//cria a imagem com bordas realçadas e a salva em seguida para comparar com a original
